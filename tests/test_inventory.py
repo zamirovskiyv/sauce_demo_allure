@@ -25,14 +25,14 @@ def test_sort_name_z_to_a(logged_in):
 # В pytest тест станет XFAIL, в Allure — серым Skipped с номером бага.
 # Когда баг починят, pytest покажет XPASS — значит, xfail пора убирать.
 #
-@pytest.mark.parametrize("username", [
-    "standard_user",
-    pytest.param("problem_user", marks=pytest.mark.xfail(reason="BUG-1: у problem_user не работает сортировка")),
-])
+# @pytest.mark.parametrize("username", [
+#     "standard_user",
+#     pytest.param("problem_user", marks=pytest.mark.xfail(reason="BUG-1: у problem_user не работает сортировка")),
+# ])
 
 # ШАГ 1 (сейчас). Мы ещё НЕ знаем о баге: тест для problem_user падает КРАСНЫМ (Failed).
 # Смотрим скриншот в Allure и оформляем баг-репорт.
-# @pytest.mark.parametrize("username", ["standard_user", "problem_user"])
+@pytest.mark.parametrize("username", ["standard_user", "problem_user"])
 def test_sort_works_for_user(driver, username):
     inventory = LoginPage(driver).open_page().login_as_valid_user(username, "secret_sauce")
     names = inventory.sort_by("za").get_product_names()
