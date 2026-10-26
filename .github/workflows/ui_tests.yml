@@ -1,0 +1,27 @@
+name: UI Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  ui-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1.Скачать код проекта
+        uses: actions/checkout@v5
+
+      - name: 2.Установить Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: 3.Установить библиотеки
+        run: pip install -r requirements.txt
+
+      - name: 4.Запустить автотесты
+        run: pytest -v
