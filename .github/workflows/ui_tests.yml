@@ -1,27 +1,106 @@
+# .github/workflows/ui_tests.yml
 name: UI Tests
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
   workflow_dispatch:
+
+permissions:
+  contents: write          # разрешаем роботу писать в репозиторий (ветка gh-pages)
 
 jobs:
   ui-tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 1.Скачать код проекта
+      - name: 1. Скачать код проекта
         uses: actions/checkout@v5
 
-      - name: 2.Установить Python
+      - name: 2. Установить Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: 3.Установить библиотеки
+      - name: 3. Установить библиотеки
         run: pip install -r requirements.txt
 
-      - name: 4.Запустить автотесты
-        run: pytest -v
+      - name: 4. Запустить автотесты
+        id: tests                       # имя шага, чтобы потом узнать его результат
+        run: pytest -v --alluredir=allure-results
+        continue-on-error: true         # даже если тесты упали — идём делать отчёт
+
+      - name: 5. Забрать историю прошлых отчётов
+        uses: actions/checkout@v5
+        if: always()
+        continue-on-error: true         # при первом запуске ветки gh-pages ещё нет — это нормально
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: 6a. Установить Java (нужна для Allure)
+        uses: actions/setup-java@v5
+        if: always()
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 6. Сгенерировать Allure-отчёт (без Docker)
+        if: always()
+        env:
+          ALLURE_VERSION: "2.44.0"
+          KEEP_REPORTS: 20              # храним 20 последних прогонов
+        run: |
+          RUN=${GITHUB_RUN_NUMBER}
+          URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+
+          # 1. Скачиваем Allure из Maven Central
+          curl -sSL -o allure.tgz "https://repo.maven.apache.org/maven2/io/qameta/allure/allure-commandline/${ALLURE_VERSION}/allure-commandline-${ALLURE_VERSION}.tgz"
+          tar -xzf allure.tgz
+          ALLURE="./allure-${ALLURE_VERSION}/bin/allure"
+
+          # 2. Берём старые отчёты из gh-pages (при первом запуске папки нет — создаём пустую)
+          mkdir -p gh-pages allure-results allure-history
+          cp -r gh-pages/. allure-history/
+          rm -rf allure-history/.git
+
+          # 3. Удаляем самые старые отчёты: остаются новый + (KEEP_REPORTS - 1) прошлых
+          ls -d allure-history/[0-9]* 2>/dev/null | sort -t/ -k2 -n -r | tail -n +"${KEEP_REPORTS}" | xargs rm -rf
+
+          # 4. История прошлых прогонов → в results, чтобы появился график Trend
+          if [ -d gh-pages/last-history ]; then
+            cp -r gh-pages/last-history/. allure-results/history
+          fi
+
+          # 5. Информация о сборке (ссылка на прогон в отчёте)
+          cat > allure-results/executor.json <<JSON
+          {"name":"GitHub Actions","type":"github","reportName":"Allure Report with history",
+           "url":"${URL}","reportUrl":"${URL}/${RUN}",
+           "buildUrl":"${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+           "buildName":"GitHub Actions Run #${GITHUB_RUN_ID}","buildOrder":"${RUN}"}
+          JSON
+
+          # 6. Генерируем отчёт
+          "${ALLURE}" generate --clean allure-results -o allure-report
+
+          # 7. Кладём отчёт в папку с номером прогона и обновляем историю
+          cp -r allure-report/. "allure-history/${RUN}"
+          rm -rf allure-history/last-history
+          cp -r allure-report/history/. allure-history/last-history
+
+          # 8. Главная страница сайта → редирект на последний отчёт
+          echo "<!DOCTYPE html><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"0; URL=${URL}/${RUN}/index.html\">" > allure-history/index.html
+
+      - name: 7. Опубликовать отчёт на GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: allure-history
+
+      - name: 8. Покрасить пайплайн в красный, если тесты упали
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
